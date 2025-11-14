@@ -1,18 +1,12 @@
-bl_info = {
-    "name": "CS2 Asset Exporter",
-    "author": "JoshMakesStuff",
-    "version": (1, 5, 3),
-    "blender": (3, 0, 0),
-    "location": "File > Export > CS2 Asset Exporter",
-    "description": "Exports meshes and materials to Counter-Strike 2 compatible format with smart texture detection and heuristics (with recursive node group search)",
-    "category": "Import-Export"
-}
+"""
+CS2 Export Module for SourceIO
+Exports Blender materials and models to CS2 format (.vmat and .fbx)
+"""
 
 import bpy
 import re
 import difflib
 from pathlib import Path
-from datetime import datetime
 
 # ---------------------------- CONSTANTS ----------------------------
 
@@ -36,10 +30,12 @@ TEXTURE_KEYWORDS = {
 # ---------------------------- UTILITIES ----------------------------
 
 def sanitize_name(name):
+    """Sanitize material name for CS2 compatibility."""
     name = name.lower()
     name = re.sub(r'[^a-z0-9_]', '_', name)
     name = re.sub(r'_+', '_', name)
     return name or 'material'
+
 
 def fuzzy_match_score(text, keywords):
     """Return best similarity score between text and any keyword."""
@@ -55,19 +51,24 @@ def fuzzy_match_score(text, keywords):
                 best_score = score
     return best_score
 
+
 def resize_image_to_multiple_of_4(image):
+    """Resize image dimensions to multiples of 4 for CS2 compatibility."""
     width = max(4, image.size[0] - (image.size[0] % 4))
     height = max(4, image.size[1] - (image.size[1] % 4))
     if image.size != (width, height):
-        print(f"[DEBUG] Resizing image {image.name} from {image.size} to ({width}, {height})")
+        print(f"[CS2Export] Resizing image {image.name} from {image.size} to ({width}, {height})")
         image.scale(width, height)
 
+
 def save_image(image, filepath):
+    """Save image as TGA file with proper dimensions."""
     resize_image_to_multiple_of_4(image)
     image.filepath_raw = str(filepath)
     image.file_format = 'TARGA'
     image.save()
-    print(f"[DEBUG] Saved texture {filepath}")
+    print(f"[CS2Export] Saved texture {filepath}")
+
 
 # ---------------------------- NODE RECURSION ----------------------------
 
@@ -83,9 +84,9 @@ def get_all_nodes_recursive(node_tree, visited=None):
 
     for node in node_tree.nodes:
         yield node
-        # Recursively search into node groups
         if isinstance(node, bpy.types.ShaderNodeGroup) and node.node_tree:
             yield from get_all_nodes_recursive(node.node_tree, visited)
+
 
 # ---------------------------- IMAGE ANALYSIS ----------------------------
 
@@ -106,6 +107,7 @@ def is_grayscale(image):
     avg_diff = color_diff_sum / count if count else 1
     return avg_diff < 0.02
 
+
 def looks_like_normal_map(image):
     """Heuristic: bluish dominant and not grayscale."""
     if not image.has_data:
@@ -123,9 +125,11 @@ def looks_like_normal_map(image):
         count += 1
     return (blue_dominance / count) > 0.6
 
+
 # ---------------------------- TEXTURE GETTERS ----------------------------
 
 def get_texture(material, tex_type, materials_dir, used_images):
+    """Find and export appropriate texture for the given type."""
     best_image = None
     best_score = 0.0
 
@@ -136,7 +140,7 @@ def get_texture(material, tex_type, materials_dir, used_images):
                 fuzzy_match_score(node.name, TEXTURE_KEYWORDS[tex_type]),
                 fuzzy_match_score(node.image.name, TEXTURE_KEYWORDS[tex_type])
             )
-            print(f"[DEBUG] {tex_type.capitalize()} score {score:.2f} for {node.image.name}")
+            print(f"[CS2Export] {tex_type.capitalize()} score {score:.2f} for {node.image.name}")
             if score > best_score:
                 best_score = score
                 best_image = node.image
@@ -147,15 +151,15 @@ def get_texture(material, tex_type, materials_dir, used_images):
             if isinstance(node, bpy.types.ShaderNodeTexImage) and node.image and node.image not in used_images:
                 img = node.image
                 if tex_type == "color" and not is_grayscale(img) and not looks_like_normal_map(img):
-                    print(f"[DEBUG] Heuristic basecolor candidate: {img.name}")
+                    print(f"[CS2Export] Heuristic basecolor candidate: {img.name}")
                     best_image = img
                     break
                 elif tex_type == "rough" and is_grayscale(img):
-                    print(f"[DEBUG] Heuristic roughness candidate: {img.name}")
+                    print(f"[CS2Export] Heuristic roughness candidate: {img.name}")
                     best_image = img
                     break
                 elif tex_type == "normal" and looks_like_normal_map(img):
-                    print(f"[DEBUG] Heuristic normal candidate: {img.name}")
+                    print(f"[CS2Export] Heuristic normal candidate: {img.name}")
                     best_image = img
                     break
 
@@ -167,21 +171,25 @@ def get_texture(material, tex_type, materials_dir, used_images):
         used_images.add(best_image)
         return f"materials/{tex_name}", best_image
 
-    print(f"[DEBUG] Using default {tex_type} for {material.name}")
+    print(f"[CS2Export] Using default {tex_type} for {material.name}")
     return f"materials/default/default_{'rough' if tex_type=='rough' else tex_type}.tga", None
+
 
 # ---------------------------- EXPORT PIPELINE ----------------------------
 
 def get_surface_type(material_name):
+    """Determine CS2 surface type from material name."""
     surface = next((s for s in SURFACE_TYPES if s in material_name.lower()), 'default')
-    print(f"[DEBUG] Surface type for {material_name} is {surface}")
+    print(f"[CS2Export] Surface type for {material_name} is {surface}")
     return surface
 
+
 def export_material(material, materials_dir):
+    """Export a single material to .vmat format."""
     mat_name = sanitize_name(material.name.split('/')[-1])
     vmat_path = materials_dir / f"{mat_name}.vmat"
 
-    print(f"[DEBUG] Exporting material {material.name} as VMAT {vmat_path.name}")
+    print(f"[CS2Export] Exporting material {material.name} as VMAT {vmat_path.name}")
 
     used_images = set()
 
@@ -191,7 +199,7 @@ def export_material(material, materials_dir):
 
     # Intelligent fallback: if no normal map but basecolor looks like one
     if (normal_img is None) and (color_img is not None) and looks_like_normal_map(color_img):
-        print(f"[DEBUG] Basecolor {color_img.name} looks like a normal map — reassigning")
+        print(f"[CS2Export] Basecolor {color_img.name} looks like a normal map — reassigning")
         normal_img = color_img
         normal_name = f"{sanitize_name(material.name.split('/')[-1])}_normal.tga"
         normal_path = f"materials/{normal_name}"
@@ -225,75 +233,65 @@ Layer0
     }}
 }}"""
     vmat_path.write_text(vmat_content)
-    print(f"[DEBUG] VMAT file saved: {vmat_path}")
+    print(f"[CS2Export] VMAT file saved: {vmat_path}")
+
 
 def export_fbx(objects, fbx_path):
+    """Export objects to FBX format."""
     bpy.ops.object.select_all(action='DESELECT')
     for obj in objects:
         obj.select_set(True)
-    bpy.ops.export_scene.fbx(filepath=str(fbx_path), use_selection=True, apply_scale_options='FBX_SCALE_UNITS',
-                             object_types={'MESH'}, bake_space_transform=True,
-                             axis_forward='-Z', axis_up='Y', mesh_smooth_type='FACE',
-                             use_mesh_modifiers=True, add_leaf_bones=False, path_mode='AUTO')
+    bpy.ops.export_scene.fbx(
+        filepath=str(fbx_path),
+        use_selection=True,
+        apply_scale_options='FBX_SCALE_UNITS',
+        object_types={'MESH'},
+        bake_space_transform=True,
+        axis_forward='-Z',
+        axis_up='Y',
+        mesh_smooth_type='FACE',
+        use_mesh_modifiers=True,
+        add_leaf_bones=False,
+        path_mode='AUTO'
+    )
     bpy.ops.object.select_all(action='DESELECT')
-    print(f"[DEBUG] FBX exported: {fbx_path}")
+    print(f"[CS2Export] FBX exported: {fbx_path}")
+
 
 def export_assets(context, export_dir):
+    """
+    Main export function - exports all materials and meshes to CS2 format.
+    
+    Args:
+        context: Blender context
+        export_dir: Directory path where assets will be exported
+    """
     export_path = Path(export_dir)
     export_path.mkdir(parents=True, exist_ok=True)
     materials_dir = export_path / 'materials'
     models_dir = export_path / 'models'
     materials_dir.mkdir(exist_ok=True)
     models_dir.mkdir(exist_ok=True)
-    print(f"[DEBUG] Starting export to {export_path}")
+    
+    print(f"[CS2Export] Starting export to {export_path}")
 
+    # Ensure material names have materials/ prefix
     for mat in bpy.data.materials:
         if not mat.name.startswith('materials/'):
             mat.name = f'materials/{mat.name}'
-            print(f"[DEBUG] Renamed Blender material to {mat.name}")
+            print(f"[CS2Export] Renamed Blender material to {mat.name}")
 
+    # Export all materials
     for mat in bpy.data.materials:
         export_material(mat, materials_dir)
 
+    # Export individual mesh objects
     mesh_objs = [obj for obj in context.scene.objects if obj.type == 'MESH']
     for obj in mesh_objs:
         export_fbx([obj], models_dir / f"{obj.name}.fbx")
 
+    # Export complete scene
     export_fbx(mesh_objs, export_path / 'scene.fbx')
-    print(f"[DEBUG] Asset export complete")
-
-# ---------------------------- BLENDER UI ----------------------------
-
-class ExportCS2(bpy.types.Operator):
-    bl_idname = "export_scene.cs2_export"
-    bl_label = "Export to CS2 Format"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    directory: bpy.props.StringProperty = bpy.props.StringProperty(subtype='DIR_PATH')
-
-    def execute(self, context):
-        try:
-            export_assets(context, self.directory)
-            self.report({'INFO'}, f"Successfully exported CS2 assets to {self.directory}")
-            return {'FINISHED'}
-        except Exception as e:
-            self.report({'ERROR'}, f"Export failed: {str(e)}")
-            return {'CANCELLED'}
-
-    def invoke(self, context, event):
-        context.window_manager.fileselect_add(self)
-        return {'RUNNING_MODAL'}
-
-def menu_func_export(self, context):
-    self.layout.operator(ExportCS2.bl_idname, text="CS2 Asset Exporter", icon='EXPORT')
-
-def register():
-    bpy.utils.register_class(ExportCS2)
-    bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
-
-def unregister():
-    bpy.utils.unregister_class(ExportCS2)
-    bpy.types.TOPBAR_MT_file_export.remove(menu_func_export)
-
-if __name__ == "__main__":
-    register()
+    
+    print(f"[CS2Export] Asset export complete")
+    print(f"[CS2Export] Exported {len(bpy.data.materials)} materials and {len(mesh_objs)} meshes")

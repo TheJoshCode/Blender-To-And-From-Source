@@ -23,7 +23,9 @@ from .operators.source2_operators import (SOURCEIO_OT_VMAPImport,
                                           SOURCEIO_OT_VPHYSImport,
                                           SOURCEIO_OT_VPK_VMAPImport,
                                           SOURCEIO_OT_VTEXImport,
-                                          SOURCEIO_OT_DMXCameraImport)
+                                          SOURCEIO_OT_DMXCameraImport,
+                                          SOURCEIO_OT_CS2Export)
+
 from .ui.export_nodes import register_nodes, unregister_nodes
 from .utils.bpy_utils import is_blender_4_1
 
@@ -99,6 +101,11 @@ def menu_import(self, context):
     self.layout.menu(SourceIO_MT_ImportMenu.bl_idname, icon_value=source_io_icon.icon_id)
 
 
+def blender2cs2(self, context):
+    """Add CS2 export to File > Export menu"""
+    self.layout.operator(SOURCEIO_OT_CS2Export.bl_idname, text="Blender2CS2")
+
+
 def load_icon(loader, filename, name):
     script_path = TinyPath(__file__).parent
     icon_path = script_path / 'icons' / filename
@@ -144,6 +151,7 @@ classes = [
     SOURCEIO_OT_VMATImport,
     SOURCEIO_OT_VPK_VMAPImport,
     SOURCEIO_OT_VMAPImport,
+    SOURCEIO_OT_CS2Export,  # CS2 Export operator
 
     # Addon tools
     # SourceIOPreferences,
@@ -159,6 +167,7 @@ classes = [
     *shared_classes,
     *flex_classes,
 ]
+
 if is_blender_4_1():
     from .operators.dragndrop import (
         IMAGE_FH_vtf_import,
@@ -185,6 +194,7 @@ register_, unregister_ = bpy.utils.register_classes_factory(classes)
 
 is_windows = platform.system() == "Windows"
 
+
 def vtf_export(self, context):
     source_io_icon = custom_icons["main"]["vtf_icon"]
     cur_img = context.space_data.image
@@ -193,6 +203,7 @@ def vtf_export(self, context):
     else:
         self.layout.operator(SOURCEIO_OT_VTFExport.bl_idname, text='Export to VTF...', icon_value=source_io_icon.icon_id).filename = \
             os.path.splitext(cur_img.name)[0]
+
 
 def register():
     # Taken from https://github.com/lasa01/Plumber/blob/master/plumber/__init__.py
@@ -210,17 +221,24 @@ def register():
     #         else:
     #             os.rename(unloaded_ext_path, ext_path)
 
-
     register_custom_icon()
     register_()
     register_nodes()
     register_props()
+    
+    # Register menus
     bpy.types.TOPBAR_MT_file_import.append(menu_import)
+    bpy.types.TOPBAR_MT_file_export.append(blender2cs2)  # Add CS2 export to File > Export
     bpy.types.IMAGE_MT_image.append(vtf_export)
+    
+    print("[SourceIO] Registered successfully with CS2 Export")
 
 
 def unregister():
+    # Remove menus
     bpy.types.TOPBAR_MT_file_import.remove(menu_import)
+    bpy.types.TOPBAR_MT_file_export.remove(blender2cs2)  # Remove CS2 export menu
+    bpy.types.IMAGE_MT_image.remove(vtf_export)
 
     # Taken from https://github.com/lasa01/Plumber/blob/master/plumber/__init__.py
     # if is_windows and False:
@@ -243,3 +261,5 @@ def unregister():
 
     unregister_custom_icon()
     unregister_()
+    
+    print("[SourceIO] Unregistered successfully")

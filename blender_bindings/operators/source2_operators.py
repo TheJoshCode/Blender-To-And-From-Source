@@ -290,3 +290,45 @@ class SOURCEIO_OT_DMXCameraImport(ImportOperatorHelper):
         for file in self.files:
             load_camera(directory / file.name, self.scale)
         return {'FINISHED'}
+
+# noinspection PyPep8Naming
+class SOURCEIO_OT_CS2Export(bpy.types.Operator):
+    """Export Blender assets to CS2 format (.vmat and .fbx)"""
+    bl_idname = "sourceio.blender2cs2"
+    bl_label = "Export to CS2"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    directory: StringProperty(
+        name="Export Directory",
+        description="Directory where CS2 assets will be exported",
+        subtype='DIR_PATH'
+    )
+
+    def execute(self, context):
+        try:
+            # Import the export function from blender2cs2 module
+            from SourceIO.blender_bindings.source2.blender2cs2 import export_assets
+            
+            # Run the export
+            export_assets(context, self.directory)
+            
+            self.report({'INFO'}, f"Successfully exported CS2 assets to {self.directory}")
+            return {'FINISHED'}
+            
+        except ImportError as e:
+            self.report({'ERROR'}, f"Failed to import blender2cs2 module: {str(e)}")
+            print(f"[CS2Export] ImportError: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'CANCELLED'}
+            
+        except Exception as e:
+            self.report({'ERROR'}, f"CS2 export failed: {str(e)}")
+            print(f"[CS2Export] Export Error: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'CANCELLED'}
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
